@@ -9994,7 +9994,7 @@ static int complete_hypercall_exit(struct kvm_vcpu *vcpu)
 	return kvm_skip_emulated_instruction(vcpu);
 }
 
-unsigned long __kvm_emulate_hypercall(struct kvm_vcpu *vcpu, unsigned long nr,
+unsigned long __kvm_handle_hypercall(struct kvm_vcpu *vcpu, unsigned long nr,
 				      unsigned long a0, unsigned long a1,
 				      unsigned long a2, unsigned long a3,
 				      int op_64_bit, int cpl)
@@ -10084,9 +10084,9 @@ out:
 	++vcpu->stat.hypercalls;
 	return ret;
 }
-EXPORT_SYMBOL_GPL(__kvm_emulate_hypercall);
+EXPORT_SYMBOL_GPL(__kvm_handle_hypercall);
 
-int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
+int kvm_handle_hypercall(struct kvm_vcpu *vcpu, bool skip)
 {
 	unsigned long nr, a0, a1, a2, a3, ret;
 	int op_64_bit;
@@ -10106,7 +10106,7 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 	op_64_bit = is_64_bit_hypercall(vcpu);
 	cpl = kvm_x86_call(get_cpl)(vcpu);
 
-	ret = __kvm_emulate_hypercall(vcpu, nr, a0, a1, a2, a3, op_64_bit, cpl);
+	ret = __kvm_handle_hypercall(vcpu, nr, a0, a1, a2, a3, op_64_bit, cpl);
 	if (nr == KVM_HC_MAP_GPA_RANGE && !ret)
 		/* MAP_GPA tosses the request to the user space. */
 		return 0;
@@ -10115,9 +10115,12 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		ret = (u32)ret;
 	kvm_rax_write(vcpu, ret);
 
-	return kvm_skip_emulated_instruction(vcpu);
+	if (skip)
+		return kvm_skip_emulated_instruction(vcpu);
+
+	return 1;
 }
-EXPORT_SYMBOL_GPL(kvm_emulate_hypercall);
+EXPORT_SYMBOL_GPL(kvm_handle_hypercall);
 
 static int emulator_fix_hypercall(struct x86_emulate_ctxt *ctxt)
 {
