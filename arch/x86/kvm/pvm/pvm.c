@@ -23,6 +23,7 @@
 #include "cpuid.h"
 #include "lapic.h"
 #include "mmu.h"
+#include "pmu.h"
 #include "trace.h"
 #include "x86.h"
 #include "pvm.h"
@@ -2702,6 +2703,64 @@ static void hardware_unsetup(void)
 {
 }
 
+//====== start of dummy pmu ===========
+//TODO: split kvm-pmu-intel.ko & kvm-pmu-amd.ko from kvm-intel.ko & kvm-amd.ko.
+static struct kvm_pmc *dummy_pmu_rdpmc_ecx_to_pmc(struct kvm_vcpu *vcpu,
+						  unsigned int idx, u64 *mask)
+{
+	return NULL;
+}
+
+static int dummy_pmu_check_rdpmc_early(struct kvm_vcpu *vcpu, unsigned int idx)
+{
+	return 0;
+}
+
+static struct kvm_pmc *dummy_pmu_msr_idx_to_pmc(struct kvm_vcpu *vcpu, u32 msr)
+{
+	return NULL;
+}
+
+static bool dummy_pmu_is_valid_msr(struct kvm_vcpu *vcpu, u32 msr)
+{
+	return 0;
+}
+
+static int dummy_pmu_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
+{
+	return 1;
+}
+
+static int dummy_pmu_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
+{
+	return 1;
+}
+
+static void dummy_pmu_refresh(struct kvm_vcpu *vcpu)
+{
+}
+
+static void dummy_pmu_init(struct kvm_vcpu *vcpu)
+{
+}
+
+static void dummy_pmu_reset(struct kvm_vcpu *vcpu)
+{
+}
+
+struct kvm_pmu_ops dummy_pmu_ops = {
+	.rdpmc_ecx_to_pmc = dummy_pmu_rdpmc_ecx_to_pmc,
+	.msr_idx_to_pmc = dummy_pmu_msr_idx_to_pmc,
+	.check_rdpmc_early = dummy_pmu_check_rdpmc_early,
+	.is_valid_msr = dummy_pmu_is_valid_msr,
+	.get_msr = dummy_pmu_get_msr,
+	.set_msr = dummy_pmu_set_msr,
+	.refresh = dummy_pmu_refresh,
+	.init = dummy_pmu_init,
+	.reset = dummy_pmu_reset,
+};
+//========== end of dummy pmu =============
+
 struct kvm_x86_nested_ops pvm_nested_ops = {};
 
 static struct kvm_x86_ops pvm_x86_ops __initdata = {
@@ -2808,6 +2867,7 @@ static struct kvm_x86_init_ops pvm_init_ops __initdata = {
 	.hardware_setup = hardware_setup,
 
 	.runtime_ops = &pvm_x86_ops,
+	.pmu_ops = &dummy_pmu_ops,
 };
 
 static void pvm_exit(void)
