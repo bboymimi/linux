@@ -16,6 +16,8 @@
 #include <endian.h>
 #include <regex.h>
 #include <tools/le_byteshift.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
 
 __attribute__((__format__(printf, 1, 2)))
 void die(char *fmt, ...) __attribute__((noreturn));

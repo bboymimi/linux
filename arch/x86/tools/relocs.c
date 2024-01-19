@@ -37,14 +37,16 @@ static struct relocs		relocs64;
 #endif
 
 struct section {
-				Elf_Shdr       shdr;
-				struct section *link;
-				Elf_Sym        *symtab;
-				Elf32_Word     *xsymtab;
-				Elf_Rel        *reltab;
-				char           *strtab;
+				Elf_Shdr         shdr;
+				struct section   *link;
+				Elf_Sym          *symtab;
+				const Elf32_Word *xsymtab;
+				Elf_Rel          *reltab;
+				const char       *strtab;
 };
 static struct section		*secs;
+
+static const void		*elf_image;
 
 static const char * const	sym_regex_kernel[S_NSYMTYPES] = {
 /*
@@ -291,7 +293,7 @@ static Elf_Sym *sym_lookup(const char *symname)
 	for (i = 0; i < shnum; i++) {
 		struct section *sec = &secs[i];
 		long nsyms;
-		char *strtab;
+		const char *strtab;
 		Elf_Sym *symtab;
 		Elf_Sym *sym;
 
@@ -354,7 +356,7 @@ static uint64_t elf64_to_cpu(uint64_t val)
 static int sym_index(Elf_Sym *sym)
 {
 	Elf_Sym *symtab = secs[shsymtabndx].symtab;
-	Elf32_Word *xsymtab = secs[shxsymtabndx].xsymtab;
+	const Elf32_Word *xsymtab = secs[shxsymtabndx].xsymtab;
 	unsigned long offset;
 	int index;
 
@@ -368,10 +370,9 @@ static int sym_index(Elf_Sym *sym)
 	return elf32_to_cpu(xsymtab[index]);
 }
 
-static void read_ehdr(FILE *fp)
+static void read_ehdr(void)
 {
-	if (fread(&ehdr, sizeof(ehdr), 1, fp) != 1)
-		die("Cannot read ELF header: %s\n", strerror(errno));
+	memcpy(&ehdr, elf_image, sizeof(ehdr));
 	if (memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0)
 		die("No ELF magic\n");
 	if (ehdr.e_ident[EI_CLASS] != ELF_CLASS)
@@ -414,60 +415,48 @@ static void read_ehdr(FILE *fp)
 
 
 	if (shnum == SHN_UNDEF || shstrndx == SHN_XINDEX) {
-		Elf_Shdr shdr;
-
-		if (fseek(fp, ehdr.e_shoff, SEEK_SET) < 0)
-			die("Seek to %" FMT " failed: %s\n", ehdr.e_shoff, strerror(errno));
-
-		if (fread(&shdr, sizeof(shdr), 1, fp) != 1)
-			die("Cannot read initial ELF section header: %s\n", strerror(errno));
+		const Elf_Shdr *shdr = elf_image + ehdr.e_shoff;
 
 		if (shnum == SHN_UNDEF)
-			shnum = elf_xword_to_cpu(shdr.sh_size);
+			shnum = elf_xword_to_cpu(shdr->sh_size);
 
 		if (shstrndx == SHN_XINDEX)
-			shstrndx = elf_word_to_cpu(shdr.sh_link);
+			shstrndx = elf_word_to_cpu(shdr->sh_link);
 	}
 
 	if (shstrndx >= shnum)
 		die("String table index out of bounds\n");
 }
 
-static void read_shdrs(FILE *fp)
+static void read_shdrs(void)
 {
+	const Elf_Shdr *shdr = elf_image + ehdr.e_shoff;
 	int i;
-	Elf_Shdr shdr;
 
 	secs = calloc(shnum, sizeof(struct section));
 	if (!secs)
 		die("Unable to allocate %ld section headers\n", shnum);
 
-	if (fseek(fp, ehdr.e_shoff, SEEK_SET) < 0)
-		die("Seek to %" FMT " failed: %s\n", ehdr.e_shoff, strerror(errno));
-
-	for (i = 0; i < shnum; i++) {
+	for (i = 0; i < shnum; i++, shdr++) {
 		struct section *sec = &secs[i];
 
-		if (fread(&shdr, sizeof(shdr), 1, fp) != 1)
-			die("Cannot read ELF section headers %d/%ld: %s\n", i, shnum, strerror(errno));
-
-		sec->shdr.sh_name      = elf_word_to_cpu(shdr.sh_name);
-		sec->shdr.sh_type      = elf_word_to_cpu(shdr.sh_type);
-		sec->shdr.sh_flags     = elf_xword_to_cpu(shdr.sh_flags);
-		sec->shdr.sh_addr      = elf_addr_to_cpu(shdr.sh_addr);
-		sec->shdr.sh_offset    = elf_off_to_cpu(shdr.sh_offset);
-		sec->shdr.sh_size      = elf_xword_to_cpu(shdr.sh_size);
-		sec->shdr.sh_link      = elf_word_to_cpu(shdr.sh_link);
-		sec->shdr.sh_info      = elf_word_to_cpu(shdr.sh_info);
-		sec->shdr.sh_addralign = elf_xword_to_cpu(shdr.sh_addralign);
-		sec->shdr.sh_entsize   = elf_xword_to_cpu(shdr.sh_entsize);
+		sec->shdr.sh_name      = elf_word_to_cpu(shdr->sh_name);
+		sec->shdr.sh_type      = elf_word_to_cpu(shdr->sh_type);
+		sec->shdr.sh_flags     = elf_xword_to_cpu(shdr->sh_flags);
+		sec->shdr.sh_addr      = elf_addr_to_cpu(shdr->sh_addr);
+		sec->shdr.sh_offset    = elf_off_to_cpu(shdr->sh_offset);
+		sec->shdr.sh_size      = elf_xword_to_cpu(shdr->sh_size);
+		sec->shdr.sh_link      = elf_word_to_cpu(shdr->sh_link);
+		sec->shdr.sh_info      = elf_word_to_cpu(shdr->sh_info);
+		sec->shdr.sh_addralign = elf_xword_to_cpu(shdr->sh_addralign);
+		sec->shdr.sh_entsize   = elf_xword_to_cpu(shdr->sh_entsize);
 		if (sec->shdr.sh_link < shnum)
 			sec->link = &secs[sec->shdr.sh_link];
 	}
 
 }
 
-static void read_strtabs(FILE *fp)
+static void read_strtabs(void)
 {
 	int i;
 
@@ -476,20 +465,11 @@ static void read_strtabs(FILE *fp)
 
 		if (sec->shdr.sh_type != SHT_STRTAB)
 			continue;
-
-		sec->strtab = malloc(sec->shdr.sh_size);
-		if (!sec->strtab)
-			die("malloc of %" FMT " bytes for strtab failed\n", sec->shdr.sh_size);
-
-		if (fseek(fp, sec->shdr.sh_offset, SEEK_SET) < 0)
-			die("Seek to %" FMT " failed: %s\n", sec->shdr.sh_offset, strerror(errno));
-
-		if (fread(sec->strtab, 1, sec->shdr.sh_size, fp) != sec->shdr.sh_size)
-			die("Cannot read symbol table: %s\n", strerror(errno));
+		sec->strtab = elf_image + sec->shdr.sh_offset;
 	}
 }
 
-static void read_symtabs(FILE *fp)
+static void read_symtabs(void)
 {
 	int i, j;
 
@@ -499,16 +479,7 @@ static void read_symtabs(FILE *fp)
 
 		switch (sec->shdr.sh_type) {
 		case SHT_SYMTAB_SHNDX:
-			sec->xsymtab = malloc(sec->shdr.sh_size);
-			if (!sec->xsymtab)
-				die("malloc of %" FMT " bytes for xsymtab failed\n", sec->shdr.sh_size);
-
-			if (fseek(fp, sec->shdr.sh_offset, SEEK_SET) < 0)
-				die("Seek to %" FMT " failed: %s\n", sec->shdr.sh_offset, strerror(errno));
-
-			if (fread(sec->xsymtab, 1, sec->shdr.sh_size, fp) != sec->shdr.sh_size)
-				die("Cannot read extended symbol table: %s\n", strerror(errno));
-
+			sec->xsymtab = elf_image + sec->shdr.sh_offset;
 			shxsymtabndx = i;
 			continue;
 
@@ -519,11 +490,7 @@ static void read_symtabs(FILE *fp)
 			if (!sec->symtab)
 				die("malloc of %" FMT " bytes for symtab failed\n", sec->shdr.sh_size);
 
-			if (fseek(fp, sec->shdr.sh_offset, SEEK_SET) < 0)
-				die("Seek to %" FMT " failed: %s\n", sec->shdr.sh_offset, strerror(errno));
-
-			if (fread(sec->symtab, 1, sec->shdr.sh_size, fp) != sec->shdr.sh_size)
-				die("Cannot read symbol table: %s\n", strerror(errno));
+			memcpy(sec->symtab, elf_image + sec->shdr.sh_offset, sec->shdr.sh_size);
 
 			for (j = 0; j < num_syms; j++) {
 				Elf_Sym *sym = &sec->symtab[j];
@@ -543,12 +510,13 @@ static void read_symtabs(FILE *fp)
 }
 
 
-static void read_relocs(FILE *fp)
+static void read_relocs(void)
 {
 	int i, j;
 
 	for (i = 0; i < shnum; i++) {
 		struct section *sec = &secs[i];
+		const Elf_Rel *reltab = elf_image + sec->shdr.sh_offset;
 
 		if (sec->shdr.sh_type != SHT_REL_TYPE)
 			continue;
@@ -557,19 +525,12 @@ static void read_relocs(FILE *fp)
 		if (!sec->reltab)
 			die("malloc of %" FMT " bytes for relocs failed\n", sec->shdr.sh_size);
 
-		if (fseek(fp, sec->shdr.sh_offset, SEEK_SET) < 0)
-			die("Seek to %" FMT " failed: %s\n", sec->shdr.sh_offset, strerror(errno));
-
-		if (fread(sec->reltab, 1, sec->shdr.sh_size, fp) != sec->shdr.sh_size)
-			die("Cannot read symbol table: %s\n", strerror(errno));
-
 		for (j = 0; j < sec->shdr.sh_size/sizeof(Elf_Rel); j++) {
 			Elf_Rel *rel = &sec->reltab[j];
-
-			rel->r_offset = elf_addr_to_cpu(rel->r_offset);
-			rel->r_info   = elf_xword_to_cpu(rel->r_info);
+			rel->r_offset = elf_addr_to_cpu(reltab[j].r_offset);
+			rel->r_info   = elf_xword_to_cpu(reltab[j].r_info);
 #if (SHT_REL_TYPE == SHT_RELA)
-			rel->r_addend = elf_xword_to_cpu(rel->r_addend);
+			rel->r_addend = elf_xword_to_cpu(reltab[j].r_addend);
 #endif
 		}
 	}
@@ -591,7 +552,7 @@ static void print_absolute_symbols(void)
 
 	for (i = 0; i < shnum; i++) {
 		struct section *sec = &secs[i];
-		char *sym_strtab;
+		const char *sym_strtab;
 		int j;
 
 		if (sec->shdr.sh_type != SHT_SYMTAB)
@@ -633,7 +594,7 @@ static void print_absolute_relocs(void)
 	for (i = 0; i < shnum; i++) {
 		struct section *sec = &secs[i];
 		struct section *sec_applies, *sec_symtab;
-		char *sym_strtab;
+		const char *sym_strtab;
 		Elf_Sym *sh_symtab;
 		int j;
 
@@ -725,7 +686,7 @@ static void walk_relocs(int (*process)(struct section *sec, Elf_Rel *rel,
 
 	/* Walk through the relocations */
 	for (i = 0; i < shnum; i++) {
-		char *sym_strtab;
+		const char *sym_strtab;
 		Elf_Sym *sh_symtab;
 		struct section *sec_applies, *sec_symtab;
 		int j;
@@ -1177,12 +1138,24 @@ void process(FILE *fp, int use_real_mode, int as_text,
 	     int show_absolute_syms, int show_absolute_relocs,
 	     int show_reloc_info)
 {
+	int fd = fileno(fp);
+	struct stat sb;
+	void *p;
+
+	if (fstat(fd, &sb))
+		die("fstat() failed\n");
+
+	elf_image = p = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (p == MAP_FAILED)
+		die("mmap() failed\n");
+
 	regex_init(use_real_mode);
-	read_ehdr(fp);
-	read_shdrs(fp);
-	read_strtabs(fp);
-	read_symtabs(fp);
-	read_relocs(fp);
+
+	read_ehdr();
+	read_shdrs();
+	read_strtabs();
+	read_symtabs();
+	read_relocs();
 
 	if (ELF_BITS == 64)
 		percpu_init();
@@ -1203,4 +1176,6 @@ void process(FILE *fp, int use_real_mode, int as_text,
 	}
 
 	emit_relocs(as_text, use_real_mode);
+
+	munmap(p, sb.st_size);
 }
