@@ -20,6 +20,9 @@
 #define RUNTIME_DISCARD_EXIT
 #define EMITS_PT_NOTE
 #define RO_EXCEPTION_TABLE_ALIGN	16
+#ifdef CONFIG_X86_64
+#define GOT_IN_RODATA
+#endif
 
 #include <asm-generic/vmlinux.lds.h>
 #include <asm/asm-offsets.h>
@@ -464,10 +467,12 @@ SECTIONS
 	 * Sections that should stay zero sized, which is safer to
 	 * explicitly check instead of blindly discarding.
 	 */
+#ifdef CONFIG_X86_32
 	.got : {
 		*(.got) *(.igot.*)
 	}
 	ASSERT(SIZEOF(.got) == 0, "Unexpected GOT entries detected!")
+#endif
 
 	.plt : {
 		*(.plt) *(.plt.*) *(.iplt)

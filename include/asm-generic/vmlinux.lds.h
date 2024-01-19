@@ -443,6 +443,12 @@
 #endif
 #endif
 
+#ifdef GOT_IN_RODATA
+#define GOT_RODATA	*(.got .igot*)
+#else
+#define GOT_RODATA
+#endif
+
 /*
  * Read only Data
  */
@@ -454,6 +460,7 @@
 		SCHED_DATA						\
 		RO_AFTER_INIT_DATA	/* Read only after init */	\
 		. = ALIGN(8);						\
+		GOT_RODATA						\
 		BOUNDED_SECTION_BY(__tracepoints_ptrs, ___tracepoints_ptrs) \
 		*(__tracepoints_strings)/* Tracepoints: strings */	\
 	}								\

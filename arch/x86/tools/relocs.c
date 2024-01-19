@@ -223,6 +223,8 @@ static const char *rel_type(unsigned type)
 		REL_TYPE(R_X86_64_JUMP_SLOT),
 		REL_TYPE(R_X86_64_RELATIVE),
 		REL_TYPE(R_X86_64_GOTPCREL),
+		REL_TYPE(R_X86_64_GOTPCRELX),
+		REL_TYPE(R_X86_64_REX_GOTPCRELX),
 		REL_TYPE(R_X86_64_32),
 		REL_TYPE(R_X86_64_32S),
 		REL_TYPE(R_X86_64_16),
@@ -843,6 +845,7 @@ static int do_reloc64(struct section *sec, Elf_Rel *rel, ElfW(Sym) *sym,
 	case R_X86_64_32:
 	case R_X86_64_32S:
 	case R_X86_64_64:
+	case R_X86_64_GOTPCREL:
 		/*
 		 * References to the percpu area don't need to be adjusted.
 		 */
@@ -861,6 +864,31 @@ static int do_reloc64(struct section *sec, Elf_Rel *rel, ElfW(Sym) *sym,
 			break;
 		}
 
+		if (r_type == R_X86_64_GOTPCREL) {
+			Elf_Shdr *s = &secs[sec->shdr.sh_info].shdr;
+			unsigned file_off = offset - s->sh_addr + s->sh_offset;
+
+			/*
+			 * GOTPCREL relocations refer to instructions that load
+			 * a 64-bit address via a 32-bit relative reference to
+			 * the GOT.  In this case, it is the GOT entry that
+			 * needs to be fixed up, not the immediate offset in
+			 * the opcode. Note that the linker will have applied an
+			 * addend of -4 to compensate for the delta between the
+			 * relocation offset and the value of RIP when the
+			 * instruction executes, and this needs to be backed out
+			 * again. (Addends other than -4 are permitted in
+			 * principle, but make no sense in practice so they are
+			 * not supported.)
+                         */
+			if (rel->r_addend != -4) {
+				die("invalid addend (%ld) for %s relocation: %s\n",
+				    rel->r_addend, rel_type(r_type), symname);
+				break;
+			}
+			offset += 4 + (int32_t)get_unaligned_le32(elf_image + file_off);
+		}
+
 		/*
 		 * Relocation offsets for 64 bit kernels are output
 		 * as 32 bits and sign extended back to 64 bits when
@@ -870,7 +898,7 @@ static int do_reloc64(struct section *sec, Elf_Rel *rel, ElfW(Sym) *sym,
 		if ((int32_t)offset != (int64_t)offset)
 			die("Relocation offset doesn't fit in 32 bits\n");
 
-		if (r_type == R_X86_64_64)
+		if (r_type == R_X86_64_64 || r_type == R_X86_64_GOTPCREL)
 			add_reloc(&relocs64, offset);
 		else
 			add_reloc(&relocs32, offset);
@@ -1085,7 +1113,8 @@ static void emit_relocs(int as_text, int use_real_mode)
 
 		/* Now print each relocation */
 		for (i = 0; i < relocs64.count; i++)
-			write_reloc(relocs64.offset[i], stdout);
+			if (!i || relocs64.offset[i] != relocs64.offset[i - 1])
+				write_reloc(relocs64.offset[i], stdout);
 
 		/* Print a stop */
 		write_reloc(0, stdout);
