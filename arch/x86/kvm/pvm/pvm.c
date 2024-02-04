@@ -18,6 +18,8 @@
 #include <asm/pvm_para.h>
 #include <asm/mmu_context.h>
 
+#include <trace/events/ipi.h>
+
 #include "cpuid.h"
 #include "lapic.h"
 #include "trace.h"
@@ -562,6 +564,25 @@ static int pvm_get_cpl(struct kvm_vcpu *vcpu)
 	return 3;
 }
 
+static void pvm_deliver_interrupt(struct kvm_lapic *apic, int delivery_mode,
+				  int trig_mode, int vector)
+{
+	struct kvm_vcpu *vcpu = apic->vcpu;
+
+	kvm_lapic_set_irr(vector, apic);
+	kvm_make_request(KVM_REQ_EVENT, vcpu);
+	kvm_vcpu_kick(vcpu);
+}
+
+static void pvm_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu)
+{
+}
+
+static bool pvm_apic_init_signal_blocked(struct kvm_vcpu *vcpu)
+{
+	return false;
+}
+
 static void pvm_setup_mce(struct kvm_vcpu *vcpu)
 {
 }
@@ -793,6 +814,9 @@ static fastpath_t pvm_vcpu_run(struct kvm_vcpu *vcpu, bool force_immediate_exit)
 	struct vcpu_pvm *pvm = to_pvm(vcpu);
 
 	trace_kvm_entry(vcpu, force_immediate_exit);
+
+	if (unlikely(force_immediate_exit))
+		smp_send_reschedule(vcpu->cpu);
 
 	pvm_load_guest_xsave_state(vcpu);
 
@@ -1079,6 +1103,8 @@ static struct kvm_x86_ops pvm_x86_ops __initdata = {
 	.vcpu_pre_run = pvm_vcpu_pre_run,
 	.vcpu_run = pvm_vcpu_run,
 	.handle_exit = pvm_handle_exit,
+	.refresh_apicv_exec_ctrl = pvm_refresh_apicv_exec_ctrl,
+	.deliver_interrupt = pvm_deliver_interrupt,
 
 	.vcpu_after_set_cpuid = pvm_vcpu_after_set_cpuid,
 
@@ -1088,8 +1114,10 @@ static struct kvm_x86_ops pvm_x86_ops __initdata = {
 
 	.setup_mce = pvm_setup_mce,
 
+	.apic_init_signal_blocked = pvm_apic_init_signal_blocked,
 	.msr_filter_changed = pvm_msr_filter_changed,
 	.complete_emulated_msr = kvm_complete_insn_gp,
+	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
 };
 
 static struct kvm_x86_init_ops pvm_init_ops __initdata = {
