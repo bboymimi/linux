@@ -227,6 +227,18 @@ SECTIONS
 	:init
 #endif
 
+	.init.rela : {
+		__rela_start = .;
+		*(.rela.*) *(.rela_*)
+		__rela_end = .;
+	}
+
+	.init.relr : {
+		__relr_start = .;
+		*(.relr.*)
+		__relr_end = .;
+	}
+
 	/*
 	 * Section for code used exclusively before alternatives are run. All
 	 * references to such code must be patched out by alternatives, normally
@@ -456,12 +468,6 @@ SECTIONS
 		*(.got) *(.igot.*)
 	}
 	ASSERT(SIZEOF(.got) == 0, "Unexpected GOT entries detected!")
-#endif
-
-	.plt : {
-		*(.plt) *(.plt.*) *(.iplt)
-	}
-	ASSERT(SIZEOF(.plt) == 0, "Unexpected run-time procedure linkages detected!")
 
 	.rel.dyn : {
 		*(.rel.*) *(.rel_*)
@@ -472,6 +478,12 @@ SECTIONS
 		*(.rela.*) *(.rela_*)
 	}
 	ASSERT(SIZEOF(.rela.dyn) == 0, "Unexpected run-time relocations (.rela) detected!")
+#endif
+
+	.plt : {
+		*(.plt) *(.plt.*) *(.iplt)
+	}
+	ASSERT(SIZEOF(.plt) == 0, "Unexpected run-time procedure linkages detected!")
 }
 
 /*
